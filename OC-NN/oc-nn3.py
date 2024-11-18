@@ -32,7 +32,7 @@ input_dim = x_train_normal.shape[1]
 encoder = tf.keras.Sequential([
     layers.Input(shape=(input_dim,)),
     layers.Dense(128, activation='relu'),
-    layers.Dense(64, activation='relu')
+    layers.Dense(64, activation='relu'),
 ])
 
 decoder = tf.keras.Sequential([
@@ -44,7 +44,7 @@ autoencoder = tf.keras.Sequential([encoder, decoder])
 autoencoder.compile(optimizer='adam', loss='mse')
 
 # Entrenar el autoencoder solo con datos normales
-autoencoder.fit(x_train_normal, x_train_normal, epochs=50, batch_size=64, validation_split=0.2, verbose=0)
+autoencoder.fit(x_train_normal, x_train_normal, epochs=100, batch_size=64, validation_split=0.2, verbose=0)
 
 # Extraer las características del encoder
 x_train_encoded = encoder.predict(x_train_normal)
@@ -52,40 +52,47 @@ x_train_encoded = encoder.predict(x_train_normal)
 # Construcción de la red OC-NN (feed-forward) con el encoder preentrenado
 oc_nn = tf.keras.Sequential([
     encoder,
-    layers.Dense(32, activation='linear', kernel_regularizer=regularizers.l2(0.001)),
+    layers.Dense(64, activation='linear', kernel_regularizer=regularizers.l2(0.001)),
     layers.Dense(1, activation='sigmoid')  # Para decidir si es normal (1) o anómalo (0)
 ])
 
 # Compilar OC-NN
-oc_nn.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.000001), loss='binary_crossentropy', metrics=['accuracy'])
+oc_nn.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.000005), loss='binary_crossentropy', metrics=['accuracy'])
 
 # Crear etiquetas (1 para normal) para entrenar la OC-NN
 y_train_ocnn = np.ones(len(x_train_normal))
 
 # Entrenar OC-NN solo con datos normales
-history = oc_nn.fit(x_train_normal, y_train_ocnn, epochs=100, batch_size=64, validation_split=0.1, verbose=0)
+history = oc_nn.fit(x_train_normal, y_train_ocnn, epochs=200, batch_size=64, validation_split=0.1, verbose=0)
 
 # Obtener los puntajes de decisión en el conjunto de prueba
 decision_scores_normal = oc_nn.predict(x_test_normal)
 decision_scores_anomalous = oc_nn.predict(x_test_anomalous)
 
-# Definir un umbral para la detección de anomalías (puedes ajustarlo según la proporción de anomalías deseada)
-#threshold = np.percentile(decision_scores_normal, 99)  # Umbral ajustado al percentil 95 de datos normales
-threshold = 0.9926;
-# Clasificación de normal y anómalo según el umbral
-predictions_normal = (decision_scores_normal > threshold).astype(int)
-predictions_anomalous = (decision_scores_anomalous <= threshold).astype(int)
+# Definir un umbral para la detección de anomalías (ajustado a un valor más bajo)
+threshold = np.percentile(decision_scores_normal, 90)
 
+# Los normales deberían tener puntajes de decisión más bajos (por debajo del umbral)
+predictions_normal = (decision_scores_normal <= threshold).astype(int)
 
-# Función para mostrar muestras con etiquetas predichas
-def show_samples(data, predictions, title, num_samples=10):
-    plt.figure(figsize=(15, 3))
-    indices = random.sample(range(len(data)), num_samples)
+# Los anómalos deberían tener puntajes de decisión más altos (por encima del umbral)
+predictions_anomalous = (decision_scores_anomalous > threshold).astype(int)
+
+def show_samples(data, predictions, title, num_samples=40):
+    # Determinar el número de columnas por fila (puedes ajustarlo)
+    ncols = 10
+    nrows = (num_samples + ncols - 1) // ncols  # Número de filas necesarias
+
+    plt.figure(figsize=(15, 3 * nrows))  # Ajustar el tamaño de la figura para que se vean bien las imágenes
+
+    indices = random.sample(range(len(data)), num_samples)  # Selección aleatoria de imágenes
+
     for i, idx in enumerate(indices):
-        ax = plt.subplot(1, num_samples, i + 1)
+        plt.subplot(nrows, ncols, i + 1)  # Organizar en filas y columnas
         plt.imshow(data[idx].reshape(28, 28), cmap="gray")
         plt.title("Normal" if predictions[idx] == 1 else "Anómalo")
         plt.axis("off")
+
     plt.suptitle(title)
     plt.show()
 
@@ -95,10 +102,10 @@ show_samples(x_test_normal, predictions_normal, "Predicciones en datos normales"
 # Mostrar muestras de datos anómalos con predicciones
 show_samples(x_test_anomalous, predictions_anomalous, "Predicciones en datos anómalos")
 
-# Mostrar distribución de puntajes
-plt.hist(decision_scores_normal, bins=50, alpha=0.5, label="Normales")
-plt.hist(decision_scores_anomalous, bins=50, alpha=0.5, label="Anómalas")
-plt.axvline(threshold, color='red', linestyle='--', label="Umbral")
+# Mostrar distribuciones separadas
+plt.hist(decision_scores_normal, bins=50, alpha=0.5, label="Normales", color='blue')
+plt.hist(decision_scores_anomalous, bins=50, alpha=0.5, label="Anómalas", color='red')
+plt.axvline(threshold, color='green', linestyle='--', label="Umbral")
 plt.legend()
 plt.title("Distribución de los puntajes de decisión")
 plt.xlabel("Puntaje")
