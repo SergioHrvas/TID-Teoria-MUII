@@ -70,7 +70,7 @@ y_train_normal_labels = np.zeros(len(y_train_normal))  # Todas las imágenes nor
 y_test_anomalous_labels = np.ones(len(x_test_anomalous))  # Imágenes anómalas etiquetadas como 1
 
 # Entrenar la red neuronal con las características del autoencoder
-model.fit(encoded_x_train, y_train_normal_labels, epochs=100, batch_size=64, callbacks=[early_stop])
+model.fit(encoded_x_train, y_train_normal_labels, epochs=125, batch_size=64, callbacks=[early_stop])
 
 # Paso 4: Hacer predicciones para las imágenes de prueba (todas las imágenes)
 encoded_x_test = encoder.predict(x_test)  # Extraer características de las imágenes de prueba
@@ -78,7 +78,7 @@ y_pred_nn = model.predict(encoded_x_test)  # Predecir la probabilidad de cada im
 
 # Paso 5: Calcular puntuaciones de decisión y clasificar las imágenes
 decision_scores = y_pred_nn.flatten()  # Puntuaciones de decisión para cada imagen de prueba
-threshold = np.percentile(decision_scores, 6)  # Umbral: percentil 50 para clasificar normal/anómalo
+threshold = np.percentile(decision_scores, 5)  # Umbral: percentil 50 para clasificar normal/anómalo
 predictions = (decision_scores >= threshold).astype(int)
 
 # Contar cuántas imágenes normales y anómalas fueron correctamente clasificadas
