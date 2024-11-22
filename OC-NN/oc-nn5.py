@@ -81,7 +81,7 @@ y_train_normal_labels = np.zeros(len(y_train_normal))  # Todas las imágenes nor
 y_test_anomalous_labels = np.ones(len(x_test_anomalous))  # Imágenes anómalas etiquetadas como 1
 
 # Entrenar la red neuronal con las características del autoencoder
-model.fit(encoded_x_train, y_train_normal_labels, epochs=150, batch_size=128, callbacks=[early_stop])
+model.fit(encoded_x_train, y_train_normal_labels, epochs=400, batch_size=128, callbacks=[early_stop])
 
 # Paso 4: Hacer predicciones para las imágenes de prueba (todas las imágenes)
 encoded_x_test = encoder.predict(x_test)  # Extraer características de las imágenes de prueba
@@ -89,7 +89,7 @@ y_pred_nn = model.predict(encoded_x_test)  # Predecir la probabilidad de cada im
 
 # Paso 5: Calcular puntuaciones de decisión y clasificar las imágenes
 decision_scores = y_pred_nn.flatten()  # Puntuaciones de decisión para cada imagen de prueba
-threshold = np.percentile(decision_scores, 5)  # Umbral: percentil 50 para clasificar normal/anómalo
+threshold = np.percentile(decision_scores, 25)  # Umbral: percentil 50 para clasificar normal/anómalo
 predictions = (decision_scores >= threshold).astype(int)
 
 # Contar cuántas imágenes normales y anómalas fueron correctamente clasificadas
@@ -120,8 +120,8 @@ def show_images(images, predictions, n=40, label='Normal', cols=10):
     plt.show()
 
 # Mostrar imágenes normales (predicción 0) y anómalas (predicción 1)
-show_images(x_test, predictions, n=40, label='Normal', cols=10)   # Primeras 20 imágenes normales
-show_images(x_test, predictions, n=40, label='Anomalous', cols=10)
+# show_images(x_test, predictions, n=40, label='Normal', cols=10)   # Primeras 20 imágenes normales
+# show_images(x_test, predictions, n=40, label='Anomalous', cols=10)
 
 def show_images_by_digit(images, predictions, labels, digit, n=20, cols=5, title_label='Prediction'):
     """
@@ -158,5 +158,60 @@ def show_images_by_digit(images, predictions, labels, digit, n=20, cols=5, title
 
 
 # Mostrar imágenes normales y anómalas con predicciones
-show_images_by_digit(x_test, predictions, y_test, digit=0, n=20, cols=5, title_label='Prediction')
-show_images_by_digit(x_test, predictions, y_test, digit=1, n=20, cols=5, title_label='Prediction')
+# show_images_by_digit(x_test, predictions, y_test, digit=0, n=20, cols=5, title_label='Prediction')
+# show_images_by_digit(x_test, predictions, y_test, digit=1, n=20, cols=5, title_label='Prediction')
+
+
+# Mostrar las imágenes mal clasificadas
+def show_misclassified(images, n=20, cols=5, title="Ceros como Anómalos"):
+    rows = (n // cols) + (n % cols != 0)
+    plt.figure(figsize=(cols * 2, rows * 2))
+    for i in range(min(n, len(images))):
+        plt.subplot(rows, cols, i + 1)
+        plt.imshow(images[i].reshape(28, 28), cmap="gray")
+        plt.title(f'{title} {i+1}')
+        plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+
+# Identificar los índices de los ceros predichos como anómalos
+incorrect_indices = (y_test == 0) & (predictions == 1)
+
+# Filtrar las imágenes mal clasificadas
+misclassified_images = x_test[incorrect_indices]
+misclassified_predictions = predictions[incorrect_indices]
+misclassified_labels = y_test[incorrect_indices]
+
+# Mostrar el número total de ceros clasificados erróneamente como anómalos
+print(f"Número de ceros mal clasificados como anómalos: {len(misclassified_images)}")
+
+# Visualizar las primeras 20 imágenes mal clasificadas
+show_misclassified(misclassified_images, n=20, cols=5)
+
+
+# Mostrar las imágenes correctamente clasificadas
+def show_correctly_classified(images, n=20, cols=5, title="Ceros como Normales"):
+    rows = (n // cols) + (n % cols != 0)
+    plt.figure(figsize=(cols * 2, rows * 2))
+    for i in range(min(n, len(images))):
+        plt.subplot(rows, cols, i + 1)
+        plt.imshow(images[i].reshape(28, 28), cmap="gray")
+        plt.title(f'{title} {i+1}')
+        plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+
+
+# Identificar los índices de los ceros correctamente predichos como normales
+correct_indices = (y_test == 0) & (predictions == 0)
+
+# Filtrar las imágenes correctamente clasificadas
+correctly_classified_images = x_test[correct_indices]
+
+# Mostrar el número total de ceros correctamente clasificados como normales
+print(f"Número de ceros correctamente clasificados como normales: {len(correctly_classified_images)}")
+
+# Visualizar las primeras 20 imágenes correctamente clasificadas
+show_correctly_classified(correctly_classified_images, n=20, cols=5)
