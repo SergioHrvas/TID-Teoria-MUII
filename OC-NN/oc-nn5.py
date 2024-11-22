@@ -7,6 +7,9 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
 
 # Cargar MNIST
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
@@ -29,7 +32,8 @@ y_test_anomalous = y_test[y_test != 0]
 input_img = Input(shape=(784,))
 encoded = Dense(128, activation='relu')(input_img)
 encoded = Dense(64, activation='relu')(encoded)
-encoded = Dense(32, activation='relu', name='encoded_layer')(encoded)
+encoded = Dense(32, activation='relu')(encoded)
+encoded = Dense(16, activation='relu', name='encoded_layer')(encoded)
 
 decoded = Dense(16, activation='relu')(encoded)
 decoded = Dense(32, activation='relu')(decoded)
@@ -51,7 +55,7 @@ encoded_x_test = encoder.predict(x_test)
 
 # Paso 3: Crear una Red Neuronal Feed-Forward para clasificación
 model = Sequential()
-model.add(Dense(256, activation='relu', input_dim=32))  # Capa de entrada correspondiente a las características extraídas
+model.add(Dense(256, activation='relu', input_dim=16))  # Capa de entrada correspondiente a las características extraídas
 model.add(Dropout(0.3))
 model.add(Dense(128, activation='relu'))
 model.add(Dropout(0.3))
@@ -77,7 +81,7 @@ y_train_normal_labels = np.zeros(len(y_train_normal))  # Todas las imágenes nor
 y_test_anomalous_labels = np.ones(len(x_test_anomalous))  # Imágenes anómalas etiquetadas como 1
 
 # Entrenar la red neuronal con las características del autoencoder
-model.fit(encoded_x_train, y_train_normal_labels, epochs=150, batch_size=32, callbacks=[early_stop])
+model.fit(encoded_x_train, y_train_normal_labels, epochs=150, batch_size=128, callbacks=[early_stop])
 
 # Paso 4: Hacer predicciones para las imágenes de prueba (todas las imágenes)
 encoded_x_test = encoder.predict(x_test)  # Extraer características de las imágenes de prueba
