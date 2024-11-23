@@ -1,98 +1,229 @@
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import layers, models
+from tensorflow.keras.layers import Input, Dropout, Dense
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.datasets import mnist
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
-# Cargar datos de MNIST
+# Cargar MNIST
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
+x_train = x_train.astype('float32') / 255.0
+x_test = x_test.astype('float32') / 255.0
 
-# Seleccionar solo las imágenes del dígito "0" como la clase normal
-x_train = x_train[y_train == 0]
-x_test_normal = x_test[y_test == 0]
+# Remodelar las imágenes para que sean vectores de 784 elementos (28x28)
+x_train = x_train.reshape((x_train.shape[0], 28 * 28))
+x_test = x_test.reshape((x_test.shape[0], 28 * 28))
+
+# Solo seleccionar imágenes de dígitos 0 para entrenar el autoencoder (imágenes normales)
+x_train_normal = x_train[y_train == 0]
+y_train_normal = y_train[y_train == 0]
+
+# Solo seleccionar imágenes de dígitos diferentes a 0 para probar el modelo (anómalas)
 x_test_anomalous = x_test[y_test != 0]
+y_test_anomalous = y_test[y_test != 0]
 
-# Escalar las imágenes para tener valores de píxeles entre 0 y 1
-x_train = x_train.astype('float32') / 255.
-x_test_normal = x_test_normal.astype('float32') / 255.
-x_test_anomalous = x_test_anomalous.astype('float32') / 255.
+# Paso 1: Definir y entrenar el Autoencoder
+input_img = Input(shape=(784,))
+encoded = Dense(128, activation='relu')(input_img)
+encoded = Dense(64, activation='relu')(encoded)
+encoded = Dense(32, activation='relu')(encoded)
+encoded = Dense(16, activation='relu', name='encoded_layer')(encoded)
 
-# Expandir las dimensiones para que las imágenes sean de la forma (28, 28, 1)
-x_train = np.expand_dims(x_train, -1)
-x_test_normal = np.expand_dims(x_test_normal, -1)
-x_test_anomalous = np.expand_dims(x_test_anomalous, -1)
+decoded = Dense(16, activation='relu')(encoded)
+decoded = Dense(32, activation='relu')(decoded)
+decoded = Dense(64, activation='relu')(decoded)
+decoded = Dense(128, activation='relu')(decoded)
+decoded = Dense(784, activation='sigmoid')(decoded)
 
-# Definir el modelo de autoencoder
-def build_autoencoder():
-    model = models.Sequential([
-        layers.Input(shape=(28, 28, 1)),
-        layers.Conv2D(32, (3, 3), activation="relu", padding="same"),
-        layers.MaxPooling2D((2, 2), padding="same"),
-        layers.Conv2D(64, (3, 3), activation="relu", padding="same"),
-        layers.MaxPooling2D((2, 2), padding="same"),
-        layers.Conv2D(64, (3, 3), activation="relu", padding="same"),
-        layers.UpSampling2D((2, 2)),
-        layers.Conv2D(32, (3, 3), activation="relu", padding="same"),
-        layers.UpSampling2D((2, 2)),
-        layers.Conv2D(1, (3, 3), activation="sigmoid", padding="same")
-    ])
-    model.compile(optimizer="adam", loss="mse")
-    return model
+autoencoder = Model(input_img, decoded)
+autoencoder.compile(optimizer="adam", loss='binary_crossentropy')
 
-autoencoder = build_autoencoder()
-autoencoder.summary()
+# Entrenar el autoencoder solo con imágenes normales (dígitos 0)
+autoencoder.fit(x_train_normal, x_train_normal, epochs=10, batch_size=64)
 
-# Entrenar el modelo de autoencoder
-autoencoder.fit(x_train, x_train, epochs=25, batch_size=32, validation_split=0.2,  verbose=0)
+# Paso 2: Usar el encoder para extraer características
+encoder = Model(inputs=autoencoder.input, outputs=autoencoder.get_layer('encoded_layer').output)
 
-# Calcular el error de reconstrucción en el conjunto de pruebas "normal" (dígitos 0)
-reconstructions = autoencoder.predict(x_test_normal)
-mse = np.mean(np.power(x_test_normal - reconstructions, 2), axis=(1, 2, 3))
-threshold = np.percentile(mse, 80)  # Definir umbral al percentil 90
-print(f"Umbral de anomalía: {threshold}")
+encoded_x_train = encoder.predict(x_train_normal)
+encoded_x_test = encoder.predict(x_test)
 
-# Evaluar en datos normales
-reconstructions_normal = autoencoder.predict(x_test_normal)
-mse_normal = np.mean(np.power(x_test_normal - reconstructions_normal, 2), axis=(1, 2, 3))
-normal_anomalies = mse_normal > threshold
+# Paso 3: Crear una Red Neuronal Feed-Forward para clasificación
+model = Sequential()
+model.add(Dense(256, activation='relu', input_dim=16))  # Capa de entrada correspondiente a las características extraídas
+model.add(Dropout(0.3))
+model.add(Dense(128, activation='relu'))
+model.add(Dropout(0.3))
+model.add(Dense(64, activation='relu'))
+model.add(Dropout(0.3))
+model.add(Dense(32, activation='relu'))
+model.add(Dropout(0.3))
+model.add(Dense(16, activation='relu'))
+model.add(Dense(1, activation='linear'))  # Para usar hinge loss, la activación final debe ser lineal
+optimizer2 = Adam(learning_rate=0.000001)
 
-# Evaluar en datos anómalos
-reconstructions_anomalous = autoencoder.predict(x_test_anomalous)
-mse_anomalous = np.mean(np.power(x_test_anomalous - reconstructions_anomalous, 2), axis=(1, 2, 3))
-anomalous_detected = mse_anomalous > threshold
+early_stop = EarlyStopping(
+    monitor='loss',       # O 'val_loss' si usas validación
+    patience=10,           # Detén después de 5 épocas sin mejora
+    mode='min',           # Queremos minimizar la pérdida
+    restore_best_weights=True  # Restaurar los mejores pesos
+)
 
-# Mostrar resultados
-print(f"Tasa de detección en datos normales (debería ser baja): {np.mean(normal_anomalies)}")
-print(f"Tasa de detección en datos anómalos (debería ser alta): {np.mean(anomalous_detected)}")
+def binary_accuracy_hinge(y_true, y_pred):
+    return tf.reduce_mean(tf.cast(tf.equal(tf.sign(y_pred), y_true), tf.float32))
+    
+model.compile(optimizer=optimizer2, loss='hinge', metrics=[binary_accuracy_hinge])
 
-def show_samples(images, titles, n=15):
-    plt.figure(figsize=(15, 5))
-    for i in range(n):
-        plt.subplot(2, n, i + 1)
-        plt.imshow(images[i].squeeze(), cmap="gray")
-        plt.title(titles[i])
-        plt.axis("off")
+# Etiquetas para la clasificación: convertir a 1 (anomalía) y -1 (normal)
+y_train_normal_labels = np.ones(len(y_train_normal)) * -1  # Cero a -1 para normales
+y_test_anomalous_labels = np.ones(len(x_test_anomalous))  # Anomalos como 1
+
+# Entrenar la red neuronal con las características del autoencoder
+model.fit(encoded_x_train, y_train_normal_labels, epochs=400, batch_size=128, callbacks=[early_stop])
+
+# Paso 4: Hacer predicciones para las imágenes de prueba (todas las imágenes)
+encoded_x_test = encoder.predict(x_test)
+y_pred_nn = model.predict(encoded_x_test)
+decision_scores_test = y_pred_nn.flatten()
+# Paso 5: Calcular puntuaciones de decisión y clasificar las imágenes
+r = np.percentile(decision_scores_test, 25)  # Cambia el percentil según lo necesario
+decision_scores = y_pred_nn.flatten() - r
+
+predictions = (decision_scores >= 0).astype(int)  # 1: Anomalo, -1: Normal
+
+predictions = np.where(predictions == 1, 1, -1)  # 1: Normal, -1: Anómalo
+
+normal_images = np.sum(predictions == -1)  # Normales
+anomalous_images = np.sum(predictions == 1)  # Anómalas
+
+print(f"Normal Images: {normal_images}")
+print(f"Anomalous Images: {anomalous_images}")
+
+# Mostrar el histograma de las puntuaciones de decisión
+plt.hist(decision_scores_test, bins=50, alpha=0.5, label='Test Data')
+plt.axvline(x=r, color='red', linestyle='--', label='Threshold')
+plt.legend()
+plt.show()
+
+
+# Función para visualizar las imágenes clasificadas
+def show_images(images, predictions, n=40, label='Normal', cols=10):
+    # Filtrar las imágenes según la clase (Normal o Anomalous)
+    if label == 'Normal':
+        filtered_images = images[predictions == 0]
+    else:
+        filtered_images = images[predictions == 1]
+    
+    rows = (n // cols) + (n % cols != 0)  # Determinar el número de filas necesario
+
+    # Mostrar las primeras 'n' imágenes filtradas
+    plt.figure(figsize=(cols * 2, rows * 2))  # Tamaño ajustado a las filas y columnas
+    for i in range(min(n, len(filtered_images))):
+        plt.subplot(rows, cols, i + 1)  # Distribución de las imágenes en filas y columnas
+        plt.imshow(filtered_images[i].reshape(28, 28), cmap="gray")
+        plt.title(f'{label} {i+1}')
+        plt.axis('off')
     plt.show()
 
-# Ejemplos de imágenes detectadas como normales
-show_samples(x_test_normal[:15], ["Normal" if not x else "Anomalía" for x in normal_anomalies[:15]])
+# Mostrar imágenes normales (predicción 0) y anómalas (predicción 1)
+# show_images(x_test, predictions, n=40, label='Normal', cols=10)   # Primeras 20 imágenes normales
+# show_images(x_test, predictions, n=40, label='Anomalous', cols=10)
 
-# Ejemplos de imágenes detectadas como anómalas
-show_samples(x_test_anomalous[:15], ["Anomalía" if x else "Normal" for x in anomalous_detected[:15]])
-def show_samples(images, titles, n=15):
-    plt.figure(figsize=(15, 5))
-    for i in range(n):
-        plt.subplot(2, n, i + 1)
-        plt.imshow(images[i].squeeze(), cmap="gray")
-        plt.title(titles[i])
-        plt.axis("off")
+def show_images_by_digit(images, predictions, labels, digit, n=20, cols=5, title_label='Prediction'):
+    """
+    Muestra imágenes de un dígito específico con su predicción.
+
+    :param images: array de imágenes a mostrar.
+    :param predictions: array de predicciones asociadas a las imágenes.
+    :param labels: etiquetas reales de las imágenes (0 para normal, 1 para anómalo).
+    :param digit: dígito específico a filtrar para mostrar (por ejemplo, 0).
+    :param n: número de imágenes a mostrar.
+    :param cols: número de columnas en el grid.
+    :param title_label: texto a mostrar en las etiquetas de las predicciones.
+    """
+    # Filtrar imágenes y predicciones según el dígito real
+    digit_indices = (labels == digit)
+    filtered_images = images[digit_indices]
+    filtered_predictions = predictions[digit_indices]
+    filtered_labels = labels[digit_indices]
+    
+    rows = (n // cols) + (n % cols != 0)  # Determinar número de filas necesario
+    plt.figure(figsize=(cols * 2, rows * 2))  # Ajustar tamaño del grid
+
+    for i in range(min(n, len(filtered_images))):
+        plt.subplot(rows, cols, i + 1)
+        plt.imshow(filtered_images[i].reshape(28, 28), cmap="gray")
+        pred_label = 'Normal' if filtered_predictions[i] == 0 else 'Anomalous'
+        true_label = 'Normal' if filtered_labels[i] == 0 else 'Anomalous'
+        plt.title(f'{title_label}: {pred_label}\nTrue: {true_label}')
+        plt.axis('off')
+
+    plt.tight_layout()
     plt.show()
 
-# Ejemplos de imágenes detectadas como normales
-show_samples(x_test_normal[:15], ["Normal" if not x else "Anomalía" for x in normal_anomalies[:15]])
 
-# Ejemplos de imágenes detectadas como anómalas
-show_samples(x_test_anomalous[:15], ["Anomalía" if x else "Normal" for x in anomalous_detected[:15]])
+
+# Mostrar imágenes normales y anómalas con predicciones
+# show_images_by_digit(x_test, predictions, y_test, digit=0, n=20, cols=5, title_label='Prediction')
+# show_images_by_digit(x_test, predictions, y_test, digit=1, n=20, cols=5, title_label='Prediction')
+
+
+# Mostrar las imágenes mal clasificadas
+def show_misclassified(images, n=20, cols=5, title="Ceros como Anómalos"):
+    rows = (n // cols) + (n % cols != 0)
+    plt.figure(figsize=(cols * 2, rows * 2))
+    for i in range(min(n, len(images))):
+        plt.subplot(rows, cols, i + 1)
+        plt.imshow(images[i].reshape(28, 28), cmap="gray")
+        plt.title(f'{title} {i+1}')
+        plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+
+# Identificar los índices de los ceros predichos como anómalos
+incorrect_indices = (y_test == 0) & (predictions == 1)
+
+# Filtrar las imágenes mal clasificadas
+misclassified_images = x_test[incorrect_indices]
+misclassified_predictions = predictions[incorrect_indices]
+misclassified_labels = y_test[incorrect_indices]
+
+# Mostrar el número total de ceros clasificados erróneamente como anómalos
+print(f"Número de ceros mal clasificados como anómalos: {len(misclassified_images)}")
+
+# Visualizar las primeras 20 imágenes mal clasificadas
+show_misclassified(misclassified_images, n=20, cols=5)
+
+
+# Mostrar las imágenes correctamente clasificadas
+def show_correctly_classified(images, n=20, cols=5, title="Ceros como Normales"):
+    rows = (n // cols) + (n % cols != 0)
+    plt.figure(figsize=(cols * 2, rows * 2))
+    for i in range(min(n, len(images))):
+        plt.subplot(rows, cols, i + 1)
+        plt.imshow(images[i].reshape(28, 28), cmap="gray")
+        plt.title(f'{title} {i+1}')
+        plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+
+
+# Identificar los índices de los ceros correctamente predichos como normales
+correct_indices = (y_test == 0) & (predictions == -1)
+
+# Filtrar las imágenes correctamente clasificadas
+correctly_classified_images = x_test[correct_indices]
+
+# Mostrar el número total de ceros correctamente clasificados como normales
+print(f"Número de ceros correctamente clasificados como normales: {len(correctly_classified_images)}")
+
+# Visualizar las primeras 20 imágenes correctamente clasificadas
+show_correctly_classified(correctly_classified_images, n=20, cols=5)
