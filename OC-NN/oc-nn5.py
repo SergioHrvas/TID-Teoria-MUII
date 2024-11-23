@@ -1,4 +1,5 @@
 import numpy as np
+import tensorflow as tf
 from tensorflow.keras.layers import Input, Dropout, Dense
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
@@ -64,7 +65,7 @@ model.add(Dropout(0.3))
 model.add(Dense(32, activation='relu'))
 model.add(Dropout(0.3))
 model.add(Dense(16, activation='relu'))
-model.add(Dense(1, activation='sigmoid'))  # Salida de 1 neurona para clasificar normal vs anómalo
+model.add(Dense(1, activation='linear'))  # Para usar hinge loss, la activación final debe ser lineal
 optimizer2 = Adam(learning_rate=0.000001)
 
 early_stop = EarlyStopping(
@@ -74,30 +75,41 @@ early_stop = EarlyStopping(
     restore_best_weights=True  # Restaurar los mejores pesos
 )
 
-model.compile(optimizer=optimizer2, loss='binary_crossentropy', metrics=['accuracy'])
+def binary_accuracy_hinge(y_true, y_pred):
+    return tf.reduce_mean(tf.cast(tf.equal(tf.sign(y_pred), y_true), tf.float32))
+    
+model.compile(optimizer=optimizer2, loss='hinge', metrics=[binary_accuracy_hinge])
 
-# Etiquetas para la clasificación (0 para normales, 1 para anómalas)
-y_train_normal_labels = np.zeros(len(y_train_normal))  # Todas las imágenes normales etiquetadas como 0
-y_test_anomalous_labels = np.ones(len(x_test_anomalous))  # Imágenes anómalas etiquetadas como 1
+# Etiquetas para la clasificación: convertir a 1 (anomalía) y -1 (normal)
+y_train_normal_labels = np.ones(len(y_train_normal)) * -1  # Cero a -1 para normales
+y_test_anomalous_labels = np.ones(len(x_test_anomalous))  # Anomalos como 1
 
 # Entrenar la red neuronal con las características del autoencoder
 model.fit(encoded_x_train, y_train_normal_labels, epochs=400, batch_size=128, callbacks=[early_stop])
 
 # Paso 4: Hacer predicciones para las imágenes de prueba (todas las imágenes)
-encoded_x_test = encoder.predict(x_test)  # Extraer características de las imágenes de prueba
-y_pred_nn = model.predict(encoded_x_test)  # Predecir la probabilidad de cada imagen
-
+encoded_x_test = encoder.predict(x_test)
+y_pred_nn = model.predict(encoded_x_test)
+decision_scores_test = y_pred_nn.flatten()
 # Paso 5: Calcular puntuaciones de decisión y clasificar las imágenes
-decision_scores = y_pred_nn.flatten()  # Puntuaciones de decisión para cada imagen de prueba
-threshold = np.percentile(decision_scores, 25)  # Umbral: percentil 50 para clasificar normal/anómalo
-predictions = (decision_scores >= threshold).astype(int)
+r = np.percentile(decision_scores_test, 25)  # Cambia el percentil según lo necesario
+decision_scores = y_pred_nn.flatten() - r
 
-# Contar cuántas imágenes normales y anómalas fueron correctamente clasificadas
-normal_images = np.sum(predictions == 0)  # Normal
-anomalous_images = np.sum(predictions == 1)  # Anómalo
+predictions = (decision_scores >= 0).astype(int)  # 1: Anomalo, -1: Normal
+
+predictions = np.where(predictions == 1, 1, -1)  # 1: Normal, -1: Anómalo
+
+normal_images = np.sum(predictions == -1)  # Normales
+anomalous_images = np.sum(predictions == 1)  # Anómalas
 
 print(f"Normal Images: {normal_images}")
 print(f"Anomalous Images: {anomalous_images}")
+
+# Mostrar el histograma de las puntuaciones de decisión
+plt.hist(decision_scores_test, bins=50, alpha=0.5, label='Test Data')
+plt.axvline(x=r, color='red', linestyle='--', label='Threshold')
+plt.legend()
+plt.show()
 
 
 # Función para visualizar las imágenes clasificadas
@@ -205,7 +217,7 @@ def show_correctly_classified(images, n=20, cols=5, title="Ceros como Normales")
 
 
 # Identificar los índices de los ceros correctamente predichos como normales
-correct_indices = (y_test == 0) & (predictions == 0)
+correct_indices = (y_test == 0) & (predictions == -1)
 
 # Filtrar las imágenes correctamente clasificadas
 correctly_classified_images = x_test[correct_indices]
